@@ -32,6 +32,31 @@ def run_worker(
         gate, actor=actor, pending_collector=pending_collector
     )
 
+    # Deterministic read shortcut (same path as /list_vms — no Worker LLM)
+    if (
+        decision.intent == "list_vms"
+        and bool((decision.extracted_params or {}).get("skip_llm"))
+        and gate is not None
+        and worker_call is None
+    ):
+        try:
+            result = gate.propose(
+                "list_vms",
+                {},
+                reason=f"nl heuristic list_vms: {message[:80]}",
+                actor=actor,
+            )
+            body = (
+                getattr(result, "execution_result", None)
+                or getattr(result, "result", None)
+                or getattr(result, "message", None)
+                or ""
+            )
+            return str(body) if body else "Sin datos."
+        except Exception as e:
+            logger.exception("deterministic list_vms failed")
+            return f"Error al listar VMs: {type(e).__name__}: {e}"
+
     if worker_call is not None:
         return worker_call(message, decision, tools)
 

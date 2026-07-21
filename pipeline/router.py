@@ -6,6 +6,7 @@ import logging
 import re
 from typing import Any, Callable
 
+from pipeline.intent_heuristics import try_deterministic_decision
 from pipeline.llms import make_llm
 from pipeline.models import RouterDecision
 
@@ -15,6 +16,8 @@ ROUTER_SYSTEM = (
     "You are a Homelab Request Router for a Proxmox home lab.\n"
     "Classify the operator message. Never invent VM IDs or write targets.\n"
     "If required params are missing for a write, set route=clarify and list missing_params.\n"
+    "Read-only inventory requests (list VMs/CTs) → route=worker, intent=list_vms, "
+    "missing_params=[] — never clarify for list-only reads.\n"
     "Prefer route=worker for routine ops; route=crisis only for structural failures.\n"
     "Return JSON matching RouterDecision fields only."
 )
@@ -56,14 +59,17 @@ def parse_router_decision(raw: Any) -> RouterDecision:
 
 
 def fail_safe_decision(message: str, error: str) -> RouterDecision:
-    """Unparseable router output → low-confidence clarify (never write)."""
+    """Unparseable router output → low-confidence clarify (never write).
+
+    Prefer deterministic heuristics before this when possible (see classify).
+    """
     return RouterDecision(
         intent="unknown",
         confidence=0.0,
         severity="info",
         route="clarify",
-        missing_params=["clarification"],
-        extracted_params={},
+        missing_params=[],
+        extracted_params={"router_error": str(error)[:200]},
         rationale=f"router_parse_failed: {error}",
     )
 
@@ -73,18 +79,38 @@ def classify(
     *,
     model_name: str | None = None,
     llm_call: Callable[[str], Any] | None = None,
+    use_heuristics: bool = True,
 ) -> RouterDecision:
     """Classify NL message into RouterDecision.
 
     llm_call: optional injectable (prompt) -> raw for unit tests.
     Live path uses crewAI Agent + response_format when available, else LLM JSON.
+    High-confidence read heuristics run first (and again on LLM failure).
     """
+    if use_heuristics:
+        hinted = try_deterministic_decision(message)
+        if hinted is not None:
+            logger.info("router heuristic hit intent=%s", hinted.intent)
+            return hinted
+
     prompt = (
         f"{ROUTER_SYSTEM}\n\n"
         f"Operator message: {message!r}\n"
         "Respond with JSON fields: intent, confidence, severity, route, "
         "missing_params, extracted_params, rationale."
     )
+
+    def _after_llm_failure(err: str) -> RouterDecision:
+        if use_heuristics:
+            hinted = try_deterministic_decision(message)
+            if hinted is not None:
+                logger.warning(
+                    "router LLM failed (%s); using heuristic intent=%s",
+                    err,
+                    hinted.intent,
+                )
+                return hinted
+        return fail_safe_decision(message, err)
 
     if llm_call is not None:
         try:
@@ -100,7 +126,7 @@ def classify(
                 return parse_router_decision(repaired)
             except Exception as e2:
                 logger.warning("router repair failed: %s", e2)
-                return fail_safe_decision(message, str(e2))
+                return _after_llm_failure(str(e2))
 
     # Live crewAI path
     try:
@@ -108,7 +134,10 @@ def classify(
 
         agent = Agent(
             role="Homelab Request Router",
-            goal="Classify ops requests; never invent VM IDs; prefer clarify when params missing",
+            goal=(
+                "Classify ops requests; never invent VM IDs; "
+                "list/inventory reads go to worker with empty missing_params"
+            ),
             backstory="Cost-aware router for a Proxmox homelab. Routes worker vs crisis.",
             llm=make_llm(model_name or "gemini-flash"),
             allow_delegation=False,
@@ -129,7 +158,7 @@ def classify(
                 )
                 return parse_router_decision(result)
             except Exception as e2:
-                return fail_safe_decision(message, str(e2))
+                return _after_llm_failure(str(e2))
     except ImportError as e:
         logger.error("crewai unavailable for router: %s", e)
-        return fail_safe_decision(message, "crewai_missing")
+        return _after_llm_failure("crewai_missing")

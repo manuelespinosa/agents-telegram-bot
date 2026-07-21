@@ -208,7 +208,9 @@ def test_unparseable_router_fails_safe_to_clarify():
     safe = fail_safe_decision("hola", "bad json")
     assert safe.route == "clarify"
     assert safe.confidence == 0.0
-    assert safe.missing_params
+    # no fake missing_params=["clarification"] — UX explains LLM failure instead
+    assert safe.missing_params == []
+    assert "router_parse_failed" in safe.rationale
 
     with pytest.raises((ValidationError, ValueError)):
         parse_router_decision("not json at all {{{")
@@ -229,6 +231,7 @@ def test_unparseable_router_fails_safe_to_clarify():
     )
     assert result.route == "clarify"
     assert result.crisis is False
+    assert "router LLM" in result.reply_text or "slash" in result.reply_text.lower()
 
 
 def test_cancel_clears_pending_clarification(tmp_path):

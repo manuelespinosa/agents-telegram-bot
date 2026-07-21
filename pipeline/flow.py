@@ -50,9 +50,23 @@ def pick_route(decision: RouterDecision, message: str) -> RouteName:
 
 
 def clarification_question(decision: RouterDecision) -> str:
-    missing = ", ".join(decision.missing_params) if decision.missing_params else "details"
+    rationale = decision.rationale or ""
+    if rationale.startswith("router_parse_failed") or decision.intent == "unknown":
+        return (
+            "No pude clasificar el mensaje con el router LLM "
+            "(revisa aliases LiteLLM: gemini-flash / qwen-coder). "
+            "Prueba un comando slash (/list_vms, /vm 300) o reformula; "
+            "para escrituras incluye el VMID. "
+            "Responde 'cancelar' si no aplica."
+        )
+    if decision.missing_params:
+        missing = ", ".join(decision.missing_params)
+        return (
+            f"Necesito un dato más antes de continuar: {missing}. "
+            "Responde con el valor (o 'cancelar' para abortar)."
+        )
     return (
-        f"Necesito un dato más antes de continuar: {missing}. "
+        "Necesito un dato más antes de continuar. "
         "Responde con el valor (o 'cancelar' para abortar)."
     )
 
