@@ -1,0 +1,33 @@
+# Curated service uptime allowlist (D-07).
+# Only names listed here may be probed — no ad-hoc host:port.
+# Placeholder URLs OK; set enabled: true on CT110 when endpoints are reachable.
+- name: jellyfin
+  probe: http
+  url: http://jellyfin.local:8096/health
+  enabled: false
+- name: immich
+  probe: http
+  url: http://immich.local:2283/api/server-info/ping
+  enabled: false
+- name: homeassistant
+  probe: http
+  url: http://homeassistant.local:8123/api/
+  enabled: false
+- name: syncthing
+  probe: http
+  url: http://syncthing.local:8384/
+  enabled: false
+- name: grafana
+  probe: http
+  url: http://grafana.local:3000/api/health
+  enabled: false
+- name: mqtt
+  probe: tcp
+  host: mqtt.local
+  port: 1883
+  enabled: false
+- name: mariadb
+  probe: tcp
+  host: mariadb.local
+  port: 3306
+  enabled: false

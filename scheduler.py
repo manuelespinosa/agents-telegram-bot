@@ -1,7 +1,7 @@
 """Programador de reporte diario vía PTB JobQueue (MON-03 / D-04).
 
-Uses application.job_queue.run_daily only — never standalone AsyncIOScheduler
-beside run_polling (lifecycle conflicts).
+Uses application.job_queue.run_daily only — never a second independent
+scheduler loop beside run_polling (lifecycle conflicts).
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ class ReportScheduler:
         if app.job_queue is None:
             raise RuntimeError(
                 "JobQueue no disponible. Instala "
-                "python-telegram-bot[job-queue] (APScheduler extra)."
+                "python-telegram-bot[job-queue]."
             )
 
         tz = ZoneInfo(settings.report_tz)

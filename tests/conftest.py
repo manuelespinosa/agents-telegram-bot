@@ -75,3 +75,21 @@ def allowed_settings(monkeypatch):
         TELEGRAM_ALLOWED_USERS="111,222",
         TELEGRAM_CHAT_ID="111",
     )
+
+
+@pytest.fixture
+def hitl_hmac_secret() -> bytes:
+    """Fixed 32+ byte HMAC secret for deterministic unit tests."""
+    return b"unit-test-hitl-hmac-secret-32b!!"
+
+
+@pytest.fixture
+def hitl_db_path(tmp_path):
+    """Temporary SQLite path for HITLStore."""
+    return str(tmp_path / "hitl.sqlite")
+
+
+@pytest.fixture
+def cost_db_path(tmp_path):
+    """Temporary SQLite path for BudgetGate cost_logs."""
+    return str(tmp_path / "cost_logs.db")
