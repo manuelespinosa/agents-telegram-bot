@@ -1,5 +1,6 @@
 """Telegram bot — Punto de entrada principal (Phase 2–4: monitor + HITL + NL pipeline)."""
 import logging
+import os
 from pathlib import Path
 
 from telegram.ext import (
@@ -46,11 +47,18 @@ MIN_HMAC_SECRET_BYTES = 32
 def _resolve_hmac_secret() -> tuple[bytes, bool]:
     """Return (secret_bytes, writes_enabled). Fail closed if short/missing."""
     raw = (settings.hitl_hmac_secret or "").encode("utf-8")
+    env_len = len(os.environ.get("HITL_HMAC_SECRET", "").encode("utf-8"))
     if len(raw) < MIN_HMAC_SECRET_BYTES:
         logger.error(
-            "HITL_HMAC_SECRET missing or shorter than %s bytes — "
-            "mutation proposes disabled (fail closed). Reads remain active.",
+            "HITL_HMAC_SECRET missing or shorter than %s bytes "
+            "(settings_len=%s env_len=%s) — mutation proposes disabled "
+            "(fail closed). Reads remain active. "
+            "Put HITL_HMAC_SECRET in compose env_file (.env next to "
+            "docker-compose.yml), value >= 32 UTF-8 chars, then "
+            "docker compose up -d --force-recreate telegram-bot.",
             MIN_HMAC_SECRET_BYTES,
+            len(raw),
+            env_len,
         )
         # Placeholder so ActionGate can construct; handlers refuse writes.
         return b"\x00" * MIN_HMAC_SECRET_BYTES, False
