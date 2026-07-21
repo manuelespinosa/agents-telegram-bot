@@ -1,29 +1,62 @@
-"""Programador de tareas periódicas (stub — implementación completa en 02-02).
+"""Programador de reporte diario vía PTB JobQueue (MON-03 / D-04).
 
-En Phase 2 se completará con APScheduler para:
-- Reporte diario de salud a las 08:00
+Uses application.job_queue.run_daily only — never standalone AsyncIOScheduler
+beside run_polling (lifecycle conflicts).
 """
+from __future__ import annotations
+
 import logging
+from datetime import time
 from typing import Any
+from zoneinfo import ZoneInfo
+
+from config import settings
 
 logger = logging.getLogger(__name__)
 
 
+async def daily_job(context: Any) -> None:
+    """JobQueue callback: send daily health report."""
+    reporter = context.application.bot_data.get("health_reporter")
+    if reporter is None:
+        logger.error("daily_job: health_reporter missing from bot_data")
+        return
+    try:
+        await reporter.send_daily_report(context.application)
+    except Exception as e:
+        logger.error("daily_job failed: %s", e)
+
+
 class ReportScheduler:
-    """Gestiona tareas programadas del bot.
+    """Registra el job diario daily_health_report en JobQueue."""
 
-    En 02-02 se implementará con JobQueue (python-telegram-bot[job-queue])
-    para enviar reportes diarios de salud a las 08:00.
-    """
+    def setup(self, app: Any) -> None:
+        """Configurar run_daily a report_hour/minute en report_tz.
 
-    def setup(self, app: Any):
-        """Configurar tareas programadas.
-
-        Args:
-            app: Instancia de Application del bot de Telegram.
-            Las implementaciones en 02-02 registrarán run_daily aquí.
+        Raises:
+            RuntimeError: if job_queue is None (missing [job-queue] extra).
         """
+        if app.job_queue is None:
+            raise RuntimeError(
+                "JobQueue no disponible. Instala "
+                "python-telegram-bot[job-queue] (APScheduler extra)."
+            )
+
+        tz = ZoneInfo(settings.report_tz)
+        when = time(
+            hour=int(settings.report_hour),
+            minute=int(settings.report_minute),
+            tzinfo=tz,
+        )
+        app.job_queue.run_daily(
+            daily_job,
+            time=when,
+            name="daily_health_report",
+        )
         logger.info(
-            "ReportScheduler: Programación de tareas disponible en Phase 2. "
-            "Por ahora, solicita /health manualmente."
+            "ReportScheduler: job daily_health_report registered at "
+            "%02d:%02d %s",
+            settings.report_hour,
+            settings.report_minute,
+            settings.report_tz,
         )
