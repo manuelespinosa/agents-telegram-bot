@@ -15,8 +15,39 @@ logger = logging.getLogger(__name__)
 
 def build_notify_text(decision: RouterDecision, message: str) -> str:
     """D-12 notify-then-run text (before DeepSeek work)."""
-    reasons = escalate_reasons(decision, message)
+    try:
+        reasons = escalate_reasons(decision, message)
+    except Exception:
+        logger.exception("escalate_reasons failed")
+        reasons = ["unknown"]
     return build_escalate_notify_text(reasons)
+
+
+def _http_crisis_analysis(message: str, decision: RouterDecision, model_name: str) -> str:
+    """Analyze via LiteLLM chat.completions without crewAI tools (resilient path)."""
+    from pipeline.router_http import chat_json
+
+    system = (
+        "You are a Homelab Crisis Analyst for a Proxmox lab. "
+        "Give concise plain-text diagnosis and recommended catalog actions only "
+        "(list_vms, vm_status, vm_start/stop/reboot, snapshot_create/list, service_uptime). "
+        "Never invent VMIDs. Writes always need human approval. No free-shell/SSH. "
+        "Do not output JSON unless helpful as a short bullet list."
+    )
+    user = (
+        f"Operator crisis message: {message!r}\n"
+        f"Router intent={decision.intent} conf={decision.confidence} "
+        f"severity={decision.severity} missing={decision.missing_params}\n"
+        f"Params: {json_safe(decision.extracted_params)}\n"
+        "Provide short findings + next safe steps."
+    )
+    return chat_json(
+        system=system,
+        user=user,
+        model=model_name,
+        temperature=0.2,
+        timeout_sec=90.0,
+    )
 
 
 def run_crisis(
@@ -32,18 +63,24 @@ def run_crisis(
     """Run crisis path.
 
     Returns (escalate_notify_text, analysis_reply_text).
-    Notify text is always produced first (D-12).
+    Notify text is always produced first (D-12) and never blocked by analysis failures.
     """
     notify = build_notify_text(decision, message)
-    tools = build_all_tools(
-        gate, actor=actor, pending_collector=pending_collector
-    )
+    model = model_name or "deepseek-r1"
 
     if crisis_call is not None:
-        analysis = crisis_call(message, decision, tools)
-        return notify, analysis
+        try:
+            analysis = crisis_call(message, decision, None)
+            return notify, analysis
+        except Exception as e:
+            logger.exception("crisis_call failed")
+            return notify, f"Crisis error: {type(e).__name__}: {e}"
 
+    # Prefer crewAI+tools, then HTTP DeepSeek, then static guidance — never raise.
     try:
+        tools = build_all_tools(
+            gate, actor=actor, pending_collector=pending_collector
+        )
         from crewai import Agent
 
         agent = Agent(
@@ -53,7 +90,7 @@ def run_crisis(
                 "Deep analysis agent for outages. Use read tools freely; "
                 "propose writes via tools (human approval required). No free-shell."
             ),
-            llm=make_llm(model_name or "deepseek-r1"),
+            llm=make_llm(model),
             tools=tools,
             allow_delegation=False,
             verbose=False,
@@ -71,8 +108,25 @@ def run_crisis(
         result = agent.kickoff(prompt)
         return notify, _result_text(result)
     except ImportError as e:
-        logger.error("crewai unavailable for crisis: %s", e)
-        return notify, "Crisis agent unavailable (crewai not installed)."
+        logger.warning("crewai unavailable for crisis: %s — HTTP fallback", e)
     except Exception as e:
-        logger.exception("crisis agent failed")
-        return notify, f"Crisis error: {type(e).__name__}: {e}"
+        logger.warning("crisis crewAI path failed: %s — HTTP fallback", e)
+
+    try:
+        analysis = _http_crisis_analysis(message, decision, model)
+        if analysis and analysis.strip():
+            return notify, analysis.strip()
+    except Exception as e:
+        logger.exception("crisis HTTP fallback failed")
+        return (
+            notify,
+            "Crisis agent no pudo completar el análisis "
+            f"({type(e).__name__}: {e}). "
+            "Usa /list_vms, /health o /vm <id> mientras se revisan logs LiteLLM.",
+        )
+
+    return (
+        notify,
+        "Crisis notify enviado; análisis vacío del modelo. "
+        "Prueba /list_vms o /health para telemetría inmediata.",
+    )

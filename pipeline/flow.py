@@ -196,21 +196,32 @@ class SysAdminFlow:
 
     def _run_crisis(self, decision: RouterDecision, message: str) -> PipelineResult:
         pending: list[Any] = []
-        if self.crisis_fn is not None:
-            notify, analysis = self.crisis_fn(
-                message,
-                decision,
-                gate=self.gate,
-                actor=self.actor,
-                pending_collector=pending,
-            )
-        else:
-            notify, analysis = run_crisis(
-                message,
-                decision,
-                gate=self.gate,
-                actor=self.actor,
-                pending_collector=pending,
+        try:
+            if self.crisis_fn is not None:
+                notify, analysis = self.crisis_fn(
+                    message,
+                    decision,
+                    gate=self.gate,
+                    actor=self.actor,
+                    pending_collector=pending,
+                )
+            else:
+                notify, analysis = run_crisis(
+                    message,
+                    decision,
+                    gate=self.gate,
+                    actor=self.actor,
+                    pending_collector=pending,
+                )
+        except Exception as e:
+            # Never fail the whole NL pipeline on crisis path (D-12 notify still useful)
+            logger.exception("crisis path raised unexpectedly")
+            from pipeline.crisis import build_notify_text
+
+            notify = build_notify_text(decision, message)
+            analysis = (
+                f"Crisis path error: {type(e).__name__}: {e}. "
+                "Usa /list_vms o /health como fallback."
             )
         self.state.escalate_notify_text = notify
         self.state.result_text = analysis
