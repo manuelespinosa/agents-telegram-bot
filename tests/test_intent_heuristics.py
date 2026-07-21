@@ -27,9 +27,25 @@ def test_list_vms_variants():
         assert is_list_vms_request(msg), msg
 
 
-def test_not_list_vms_write():
+def test_write_with_vmid_heuristic():
+    d = try_deterministic_decision("reinicia la VM 300")
+    assert d is not None
+    assert d.intent == "vm_reboot"
+    assert d.route == "worker"
+    assert d.extracted_params.get("vmid") == 300
+    assert d.extracted_params.get("skip_llm") is True
+
+
+def test_write_missing_vmid_clarify():
+    d = try_deterministic_decision("apaga la maquina por favor")
+    assert d is not None
+    assert d.route == "clarify"
+    assert d.missing_params == ["vmid"]
+
+
+def test_not_list_vms_write_still_detected_as_write():
     assert is_list_vms_request("reinicia la VM 300") is False
-    assert try_deterministic_decision("snapshot create 300") is None
+    assert try_deterministic_decision("snapshot de la vm 300") is not None
 
 
 def test_classify_prefers_heuristic_without_llm():
@@ -52,6 +68,8 @@ def test_worker_skip_llm_calls_gate(monkeypatch):
                 execution_result = "vm 100 running"
                 result = None
                 message = "ok"
+                needs_approval = False
+                status = "ok"
             return R()
 
     from pipeline.models import RouterDecision
@@ -65,3 +83,33 @@ def test_worker_skip_llm_calls_gate(monkeypatch):
     )
     text = run_worker("lista las VMs", d, gate=FakeGate(), actor="test")
     assert "vm 100" in text
+
+
+def test_worker_skip_llm_write_collects_pending():
+    class FakeGate:
+        def propose(self, action_id, params, reason="", actor=""):
+            assert action_id == "vm_reboot"
+            assert params["vmid"] == 300
+            class R:
+                execution_result = None
+                result = None
+                message = "pending approve"
+                needs_approval = True
+                status = "pending"
+                request_id = "abc"
+            return R()
+
+    from pipeline.models import RouterDecision
+
+    pending = []
+    d = RouterDecision(
+        intent="vm_reboot",
+        confidence=0.92,
+        route="worker",
+        extracted_params={"skip_llm": True, "vmid": 300, "action_id": "vm_reboot"},
+    )
+    text = run_worker(
+        "reinicia vm 300", d, gate=FakeGate(), actor="test", pending_collector=pending
+    )
+    assert pending
+    assert "aprobación" in text.lower() or "pending" in text.lower()

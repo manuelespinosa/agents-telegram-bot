@@ -255,7 +255,9 @@ def test_pick_route_ordering():
 
     # missing params wins over low conf
     d = _d(confidence=0.1, missing_params=["vmid"], route="crisis")
-    assert pick_route(d, "urgente") == "clarify"
+    # D-09: crisis keywords win even when missing_params would clarify
+    assert pick_route(d, "urgente") == "crisis"
+    assert pick_route(d, "necesito vmid please") == "clarify"
     d2 = _d(confidence=0.9, route="worker")
     assert pick_route(d2, "lista") == "worker"
     d3 = _d(confidence=0.9, route="worker")

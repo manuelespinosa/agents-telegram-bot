@@ -32,30 +32,51 @@ def run_worker(
         gate, actor=actor, pending_collector=pending_collector
     )
 
-    # Deterministic read shortcut (same path as /list_vms — no Worker LLM)
+    # Deterministic catalog shortcut (slash-equivalent — no Worker LLM)
+    params = decision.extracted_params or {}
     if (
-        decision.intent == "list_vms"
-        and bool((decision.extracted_params or {}).get("skip_llm"))
+        bool(params.get("skip_llm"))
         and gate is not None
         and worker_call is None
+        and decision.intent
     ):
+        action_id = str(params.get("action_id") or decision.intent)
         try:
+            propose_params: dict[str, Any] = {}
+            if "vmid" in params and params["vmid"] is not None:
+                propose_params["vmid"] = int(params["vmid"])
+            if action_id == "snapshot_create":
+                if params.get("snapname"):
+                    propose_params["snapname"] = str(params["snapname"])
+                else:
+                    # catalog requires snapname; deterministic default for NL shortcut
+                    from datetime import datetime, timezone
+
+                    propose_params["snapname"] = (
+                        f"nl_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+                    )
             result = gate.propose(
-                "list_vms",
-                {},
-                reason=f"nl heuristic list_vms: {message[:80]}",
+                action_id,
+                propose_params,
+                reason=f"nl heuristic {action_id}: {message[:80]}",
                 actor=actor,
             )
+            needs = bool(getattr(result, "needs_approval", False))
+            status = getattr(result, "status", "") or ""
+            if (needs or status == "pending") and pending_collector is not None:
+                pending_collector.append(result)
             body = (
                 getattr(result, "execution_result", None)
                 or getattr(result, "result", None)
                 or getattr(result, "message", None)
                 or ""
             )
+            if needs or status == "pending":
+                return str(body) or "Propuesta enviada (pendiente de aprobación HITL)."
             return str(body) if body else "Sin datos."
         except Exception as e:
-            logger.exception("deterministic list_vms failed")
-            return f"Error al listar VMs: {type(e).__name__}: {e}"
+            logger.exception("deterministic %s failed", action_id)
+            return f"Error en {action_id}: {type(e).__name__}: {e}"
 
     if worker_call is not None:
         return worker_call(message, decision, tools)

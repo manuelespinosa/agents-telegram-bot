@@ -7,7 +7,11 @@ from typing import Any, Callable, Literal
 from pydantic import BaseModel, Field
 
 from pipeline.crisis import run_crisis
-from pipeline.crisis_keywords import needs_clarification, should_escalate
+from pipeline.crisis_keywords import (
+    keyword_hit,
+    needs_clarification,
+    should_escalate,
+)
 from pipeline.models import PipelineResult, RouterDecision
 from pipeline.router import classify as default_classify
 from pipeline.worker import run_worker
@@ -41,7 +45,13 @@ class PipelineState(BaseModel):
 
 
 def pick_route(decision: RouterDecision, message: str) -> RouteName:
-    """Code rules win over model route: clarify > escalate > worker."""
+    """Code rules win over model route.
+
+    Order (D-09): crisis **keywords** first (even if router failed → clarify),
+    then missing-params clarify, then confidence/severity escalate, else worker.
+    """
+    if keyword_hit(message):
+        return "crisis"
     if needs_clarification(decision):
         return "clarify"
     if should_escalate(decision, message):

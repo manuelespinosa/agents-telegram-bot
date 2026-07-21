@@ -9,6 +9,7 @@ from typing import Any, Callable
 from pipeline.intent_heuristics import try_deterministic_decision
 from pipeline.llms import make_llm
 from pipeline.models import RouterDecision
+from pipeline.router_http import chat_json, router_user_payload
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,18 @@ def classify(
                 logger.warning("router repair failed: %s", e2)
                 return _after_llm_failure(str(e2))
 
-    # Live crewAI path
+    # 1) Direct LiteLLM HTTP (preferred — no crewAI Agent parse quirks)
+    try:
+        raw = chat_json(
+            system=ROUTER_SYSTEM + "\nRespond with a single JSON object only.",
+            user=router_user_payload(message),
+            model=model_name or "gemini-flash",
+        )
+        return parse_router_decision(raw)
+    except Exception as e_http:
+        logger.warning("router HTTP classify failed: %s", e_http)
+
+    # 2) crewAI Agent fallback
     try:
         from crewai import Agent
 
@@ -158,7 +170,7 @@ def classify(
                 )
                 return parse_router_decision(result)
             except Exception as e2:
-                return _after_llm_failure(str(e2))
+                return _after_llm_failure(f"http:{e_http}; crewai:{e2}")
     except ImportError as e:
         logger.error("crewai unavailable for router: %s", e)
-        return _after_llm_failure("crewai_missing")
+        return _after_llm_failure(f"http:{e_http}; crewai_missing:{e}")
