@@ -6,6 +6,7 @@ import logging
 import re
 from typing import Any, Callable
 
+from pipeline.cost_logger import record_usage, usage_from_crewai_result
 from pipeline.intent_heuristics import try_deterministic_decision
 from pipeline.llms import make_llm
 from pipeline.models import RouterDecision
@@ -141,6 +142,7 @@ def classify(
         logger.warning("router HTTP classify failed: %s", e_http)
 
     # 2) crewAI Agent fallback
+    router_model = model_name or "gemini-flash"
     try:
         from crewai import Agent
 
@@ -151,16 +153,25 @@ def classify(
                 "list/inventory reads go to worker with empty missing_params"
             ),
             backstory="Cost-aware router for a Proxmox homelab. Routes worker vs crisis.",
-            llm=make_llm(model_name or "gemini-flash"),
+            llm=make_llm(router_model),
             allow_delegation=False,
             verbose=False,
         )
+
+        def _record_crewai(result: Any) -> None:
+            try:
+                record_usage(usage_from_crewai_result(result, model=router_model))
+            except Exception:
+                logger.exception("router cost record failed model=%s", router_model)
+
         try:
             result = agent.kickoff(prompt, response_format=RouterDecision)
+            _record_crewai(result)
             return parse_router_decision(result)
         except TypeError:
             # older/newer crewAI without response_format kw
             result = agent.kickoff(prompt)
+            _record_crewai(result)
             return parse_router_decision(result)
         except Exception as e:
             logger.warning("router kickoff failed, retry once: %s", e)
@@ -168,6 +179,7 @@ def classify(
                 result = agent.kickoff(
                     prompt + "\nReturn ONLY valid JSON for RouterDecision."
                 )
+                _record_crewai(result)
                 return parse_router_decision(result)
             except Exception as e2:
                 return _after_llm_failure(f"http:{e_http}; crewai:{e2}")

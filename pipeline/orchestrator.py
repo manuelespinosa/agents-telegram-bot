@@ -5,7 +5,7 @@ import logging
 from typing import Any, Callable
 
 from pipeline.clarification_store import ClarificationStore
-from pipeline.cost_logger import log_usage
+from pipeline.cost_logger import cost_db_scope
 from pipeline.flow import SysAdminFlow
 from pipeline.models import PipelineResult, RouterDecision
 from pipeline.router import classify as default_classify
@@ -69,7 +69,8 @@ def run_pipeline(
     - Merges pending clarification answers (D-03/D-04)
     - Cancels on explicit cancelar/cancel
     - Soft budget warning when mutations_allowed is False
-    - Logs a router usage row when cost_db_path set (tokens may be 0 if unknown)
+    - Binds cost_db_scope so nested LLM calls (router_http / crewAI) record real USD
+    - After run, trips BudgetGate when rolling 24h cost exceeds max
     """
     message = (text or "").strip()
     if not message:
@@ -123,18 +124,45 @@ def run_pipeline(
         crisis_fn=crisis_fn,
         budget_warning=budget_warning,
     )
-    result = flow.run(message)
 
-    if cost_db_path:
+    # Nested router/worker/crisis LLM calls record via cost_logger.record_usage
+    # when cost_db_path is set (no more hardcoded cost=0.0 placeholder rows).
+    with cost_db_scope(cost_db_path):
+        result = flow.run(message)
+
+    # Kill-switch after live spend is on the ledger
+    if budget is not None:
         try:
-            log_usage(
-                cost_db_path,
-                model=router_model,
-                tokens_in=0,
-                tokens_out=0,
-                cost=0.0,
-            )
+            alert = budget.check_and_trip()
+            if alert:
+                # Surface kill-switch on the same reply path
+                prefix = f"{alert}\n"
+                if result.budget_warning:
+                    result = result.model_copy(
+                        update={
+                            "budget_warning": f"{result.budget_warning}\n{alert}",
+                            "reply_text": f"{prefix}{result.reply_text}",
+                        }
+                    )
+                else:
+                    result = result.model_copy(
+                        update={
+                            "budget_warning": alert,
+                            "reply_text": f"{prefix}{result.reply_text}",
+                        }
+                    )
+            elif not result.budget_warning:
+                warn = budget.soft_warn_if_needed()
+                if warn:
+                    result = result.model_copy(
+                        update={
+                            "budget_warning": warn,
+                            "reply_text": f"{warn}\n{result.reply_text}",
+                        }
+                    )
         except Exception:
-            logger.exception("cost log failed")
+            logger.exception("budget check_and_trip failed")
 
+    # router_model kept for API compat (call sites / tests may pass it)
+    _ = router_model
     return result

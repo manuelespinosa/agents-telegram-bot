@@ -231,6 +231,20 @@ class LogCrawler:
                 )
                 if not content or not str(content).strip():
                     return None
+                # Feed BudgetGate ledger (provider cost or token estimate)
+                try:
+                    from pipeline.cost_logger import (
+                        record_usage,
+                        usage_from_openai_response,
+                    )
+
+                    cost_path = getattr(settings, "cost_db_path", None)
+                    metrics = usage_from_openai_response(
+                        data, model="gemini-flash"
+                    )
+                    record_usage(metrics, cost_db_path=cost_path)
+                except Exception:
+                    logger.debug("llm_polish cost record skipped", exc_info=True)
                 return str(content).strip()
         except Exception as e:
             logger.info("llm_polish failed (fallback to structured): %s", e)

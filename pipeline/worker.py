@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
+from pipeline.cost_logger import record_usage, usage_from_crewai_result
 from pipeline.llms import make_llm
 from pipeline.models import RouterDecision
 from pipeline.tools import build_worker_tools
@@ -81,6 +82,7 @@ def run_worker(
     if worker_call is not None:
         return worker_call(message, decision, tools)
 
+    model = model_name or "qwen-coder"
     try:
         from crewai import Agent
 
@@ -91,7 +93,7 @@ def run_worker(
                 "You operate a Proxmox homelab. Use tools for reads and write proposals. "
                 "Never invent targets. Writes require human approval after propose."
             ),
-            llm=make_llm(model_name or "qwen-coder"),
+            llm=make_llm(model),
             tools=tools,
             allow_delegation=False,
             verbose=False,
@@ -105,6 +107,10 @@ def run_worker(
             "Use tools as needed. Reply in plain text summarizing outcomes."
         )
         result = agent.kickoff(prompt)
+        try:
+            record_usage(usage_from_crewai_result(result, model=model))
+        except Exception:
+            logger.exception("worker cost record failed model=%s", model)
         return _result_text(result)
     except ImportError as e:
         logger.error("crewai unavailable for worker: %s", e)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
+from pipeline.cost_logger import record_usage, usage_from_crewai_result
 from pipeline.crisis_keywords import build_escalate_notify_text, escalate_reasons
 from pipeline.llms import make_llm
 from pipeline.models import RouterDecision
@@ -106,6 +107,10 @@ def run_crisis(
             "Plain text findings."
         )
         result = agent.kickoff(prompt)
+        try:
+            record_usage(usage_from_crewai_result(result, model=model))
+        except Exception:
+            logger.exception("crisis cost record failed model=%s", model)
         return notify, _result_text(result)
     except ImportError as e:
         logger.warning("crewai unavailable for crisis: %s — HTTP fallback", e)

@@ -1,6 +1,7 @@
 """Direct OpenAI-compatible chat.completions against LiteLLM (no crewAI).
 
 More reliable for structured RouterDecision JSON than Agent.kickoff + response_format.
+Records real usage into the BudgetGate ledger when cost_db_scope is active.
 """
 from __future__ import annotations
 
@@ -9,8 +10,40 @@ import logging
 from typing import Any
 
 from config import settings
+from pipeline.cost_logger import record_usage, usage_from_openai_response
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_content(data: dict[str, Any]) -> str:
+    choices = data.get("choices") or []
+    if not choices:
+        raise ValueError("empty choices from LiteLLM")
+    msg = choices[0].get("message") or {}
+    content = msg.get("content")
+    if content is None:
+        # DeepSeek-R1 style: reasoning only
+        content = msg.get("reasoning_content") or msg.get("reasoning")
+    if not content:
+        raise ValueError(f"empty message content keys={list(msg.keys())}")
+    if isinstance(content, list):
+        # multimodal fragments
+        parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                parts.append(part.get("text") or "")
+            elif isinstance(part, str):
+                parts.append(part)
+        content = "".join(parts)
+    return str(content)
+
+
+def _record_from_response(data: dict[str, Any], model_name: str) -> None:
+    try:
+        metrics = usage_from_openai_response(data, model=model_name)
+        record_usage(metrics)
+    except Exception:
+        logger.exception("failed to record usage for model=%s", model_name)
 
 
 def chat_json(
@@ -21,7 +54,11 @@ def chat_json(
     temperature: float = 0.1,
     timeout_sec: float = 45.0,
 ) -> str:
-    """POST /chat/completions; return assistant message content (string)."""
+    """POST /chat/completions; return assistant message content (string).
+
+    When ``cost_db_scope`` is active, appends a cost_logs row from response
+    ``usage`` / ``response_cost`` (or token-based estimate).
+    """
     import httpx
 
     base = (settings.litellm_url or "http://litellm:4000/v1").rstrip("/")
@@ -58,26 +95,9 @@ def chat_json(
             raise
 
         data = resp.json()
-        choices = data.get("choices") or []
-        if not choices:
-            raise ValueError("empty choices from LiteLLM")
-        msg = choices[0].get("message") or {}
-        content = msg.get("content")
-        if content is None:
-            # DeepSeek-R1 style: reasoning only
-            content = msg.get("reasoning_content") or msg.get("reasoning")
-        if not content:
-            raise ValueError(f"empty message content keys={list(msg.keys())}")
-        if isinstance(content, list):
-            # multimodal fragments
-            parts = []
-            for part in content:
-                if isinstance(part, dict) and part.get("type") == "text":
-                    parts.append(part.get("text") or "")
-                elif isinstance(part, str):
-                    parts.append(part)
-            content = "".join(parts)
-        return str(content)
+        content = _extract_content(data)
+        _record_from_response(data, model_name)
+        return content
 
 
 def router_user_payload(message: str) -> str:
