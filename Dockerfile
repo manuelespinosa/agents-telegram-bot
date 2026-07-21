@@ -7,8 +7,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# No ejecutar como root
+# Data dir for ChatStore SQLite; non-root bot user
 RUN groupadd -r bot && useradd -r -g bot -d /app -s /bin/false bot && \
+    mkdir -p /app/data && \
     chown -R bot:bot /app
 USER bot
 

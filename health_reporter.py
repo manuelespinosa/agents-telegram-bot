@@ -8,7 +8,7 @@ En Phase 2 se implementará:
 - Enviar a Telegram
 """
 import logging
-from telegram.ext import Application
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class HealthReporter:
             "Usa /health más tarde para el reporte completo."
         )
 
-    async def send_daily_report(self, app: Application):
+    async def send_daily_report(self, app: Any):
         """Enviar reporte diario programado (08:00).
 
         Args:
