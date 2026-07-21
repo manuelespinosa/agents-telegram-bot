@@ -129,7 +129,7 @@ def main():
     app.add_handler(CommandHandler("vm_start", cmd_vm_start))
     app.add_handler(CommandHandler("vm_stop", cmd_vm_stop))
     app.add_handler(CommandHandler("vm_reboot", cmd_vm_reboot))
-    app.add_handler(CommandHandler("resume-budget", cmd_resume_budget))
+    # Telegram Bot API: commands must match [a-z0-9_]{1,32} — hyphens invalid
     app.add_handler(CommandHandler("resume_budget", cmd_resume_budget))
 
     # NL free-text → pipeline (group=1 after CommandHandlers so slash never hits NL)

@@ -129,12 +129,12 @@ class BudgetGate:
                 f"🛑 Budget kill-switch\n"
                 f"Coste 24h: ${cost:.4f} / ${self.max_usd:.2f}\n"
                 f"Mutaciones pausadas. Monitor read-only sigue activo.\n"
-                f"Reanudar: /resume-budget"
+                f"Reanudar: /resume_budget"
             )
         return None
 
     def clear_paused(self) -> None:
-        """Manual resume foundation (D-15); wired to /resume-budget in 03-02."""
+        """Manual resume foundation (D-15); wired to /resume_budget in 03-02."""
         self._set_paused(False)
         logger.info("BudgetGate: pause cleared (manual resume)")
 

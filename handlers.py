@@ -439,7 +439,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /list_vms — Inventario VMs/CTs (read)\n"
         "• /vm <id> — Diagnóstico de VM\n"
         "• /vm_start|/vm_stop|/vm_reboot <id> — proponer mutación (HITL)\n"
-        "• /resume-budget — reanudar mutaciones tras kill-switch\n"
+        "• /resume_budget — reanudar mutaciones tras kill-switch\n"
         "• /help — Ayuda detallada\n\n"
         "🔒 Escritura solo tras Aprobar (5 min timeout, nunca auto-ejecuta)."
     )
@@ -460,7 +460,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/vm_stop <id>\n"
         "/vm_reboot <id>\n\n"
         "Budget:\n"
-        "/resume-budget — limpia kill-switch de mutaciones (D-15)\n"
+        "/resume_budget — limpia kill-switch de mutaciones (D-15)\n"
         "  (lecturas siguen activas aunque mutaciones estén pausadas)\n\n"
         "/start — Bienvenida\n"
         "/help — Esta ayuda\n\n"

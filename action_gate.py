@@ -171,7 +171,7 @@ class ActionGate:
                     status="blocked",
                     needs_approval=False,
                     message=alert
-                    or "Mutaciones pausadas por budget kill-switch. Usa /resume-budget.",
+                    or "Mutaciones pausadas por budget kill-switch. Usa /resume_budget.",
                     action_id=action_id,
                     tier=defn.tier.value,
                 )

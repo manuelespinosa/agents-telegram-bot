@@ -41,7 +41,7 @@ def test_trip_on_half_dollar_pauses_and_alerts(cost_db_path, hitl_db_path):
     alert = gate.check_and_trip()
     assert alert is not None
     assert "0.50" in alert or "$0.50" in alert
-    assert "resume-budget" in alert.lower() or "/resume-budget" in alert
+    assert "resume_budget" in alert.lower() or "/resume_budget" in alert
     assert "paus" in alert.lower()  # pausadas / paused
     assert gate.is_paused() is True
     assert gate.mutations_allowed() is False
